@@ -1,13 +1,40 @@
 <!-- src/lib/components/SatelliteGlobe.svelte -->
+
+<!-- МОДУЛЬНЫЙ СКРИПТ ДЛЯ ЭКСПОРТА ТИПОВ -->
+<script context="module" lang="ts">
+	import type * as THREE_TYPES from 'three'; // Импортируем типы Three.js
+	import type * as SATELLITE_TYPES from 'satellite.js'; // Импортируем типы satellite.js
+    // Импортируем типы из других компонентов/файлов
+    import type { SatelliteDetails } from '$lib/satellite-info';
+
+    // Определяем и экспортируем типы здесь
+    export type OrbitClassification = 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'Unknown';
+
+	export interface SatelliteObject {
+		name: string;
+		satrec: SATELLITE_TYPES.SatRec; // Используем импортированный тип
+		mesh: THREE_TYPES.Mesh; // Используем импортированный тип
+		defaultColor: number;
+		trackLine?: THREE_TYPES.Line; // Используем импортированный тип
+		details: SatelliteDetails;
+		orbitType: OrbitClassification;
+		isVisible: boolean;
+        currentLatRad?: number;
+        currentLonRad?: number;
+	}
+</script>
+
+<!-- ОСНОВНОЙ СКРИПТ КОМПОНЕНТА -->
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import * as satellite from 'satellite.js';
-	// Импорт справочника и типов
-	import { getSatelliteDetails, type SatelliteDetails } from '$lib/satellite-info';
-	// Импортируем типы фильтров ИЗ ФАЙЛА ФИЛЬТРА
+	// Импорт справочника (функции)
+	import { getSatelliteDetails } from '$lib/satellite-info';
+	// Импорт типов фильтров
 	import type { OrbitFilter, TypeFilter } from './SatelliteFilter.svelte';
+    // Типы SatelliteObject и OrbitClassification доступны из context="module" выше
 
 	// --- Props ---
 	export let radiationRiskLevel: string = 'None';
@@ -32,29 +59,19 @@
 	const HAZARD_COLOR = 0xff00ff;
 	const TRACK_COLOR = 0x888888;
 
-	// --- Типы Данных ---
+	// --- Локальный тип данных для TLE ---
 	interface FetchedTleData {
 		name: string;
 		tle1: string;
 		tle2: string;
 	}
-
-    type OrbitClassification = 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'Unknown';
-
-	interface SatelliteObject {
-		name: string;
-		satrec: satellite.SatRec;
-		mesh: THREE.Mesh; // Используем Mesh
-		defaultColor: number;
-		trackLine?: THREE.Line;
-		details: SatelliteDetails; // Детали из справочника
-		orbitType: OrbitClassification; // Используем определенный тип
-		isVisible: boolean; // Флаг видимости по фильтру
-	}
     // ------------------------------------
 
-    // Переменные для хранения объектов Three.js (доступны в onMount и замыканиях)
-    let localSatelliteObjects: SatelliteObject[] = []; // Объявлена здесь для доступа из реактивного блока $:, если он будет нужен
+    // Переменная для хранения объектов спутников
+    let localSatelliteObjects: SatelliteObject[] = [];
+
+	// --- ДИСПЕТЧЕР СОБЫТИЙ ДЛЯ КЛИКА ---
+    const dispatch = createEventDispatcher<{ satelliteclick: SatelliteObject; }>();
 
 	// --- Функции ---
 
@@ -69,6 +86,7 @@
 				 catch { /* ignore */ }
 				 throw new Error(errorMsg);
 			}
+            // Используем тип FetchedTleData
 			const data: FetchedTleData[] = await response.json();
 			 if (!Array.isArray(data)) { throw new Error('Invalid TLE data format received from API.'); }
 			console.log('[SatelliteGlobe] TLE data fetched successfully:', data.length);
@@ -99,15 +117,17 @@
                     const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
                     points.push(new THREE.Vector3(x, y, z));
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) { /* Игнорируем ошибки пропагации для точек трека */ }
         }
+        // Тип THREE.Vector3[]
         return points;
     }
 
+    // Используем OrbitClassification
 	function classifyOrbit(satrec: satellite.SatRec): OrbitClassification {
         const meanMotionRadPerMin = satrec.no;
         const periodMinutes = (2 * Math.PI) / meanMotionRadPerMin;
-        const mu = 398600.4418; // km^3/s^2
+        const mu = 398600.4418;
         const meanMotionRadPerSec = meanMotionRadPerMin / 60;
         if (meanMotionRadPerSec === 0) return 'Unknown';
         const semiMajorAxisKm = Math.cbrt(mu / (meanMotionRadPerSec * meanMotionRadPerSec));
@@ -128,19 +148,15 @@
         if (!satellites || satellites.length === 0) return;
         satellites.forEach(sat => {
             let orbitMatch = false; let typeMatch = false;
-            // Проверка фильтра орбиты
             if (currentOrbitFilter === 'ALL') { orbitMatch = true; }
             else if (currentOrbitFilter === 'LEO') { orbitMatch = sat.orbitType === 'LEO'; }
             else if (currentOrbitFilter === 'MEO_GEO_HEO') { orbitMatch = ['MEO', 'GEO', 'HEO'].includes(sat.orbitType); }
-            // Проверка фильтра типа/камеры
             if (currentTypeFilter === 'ALL') { typeMatch = true; }
             else if (currentTypeFilter === 'ISS') { typeMatch = sat.details.type === 'ISS'; }
             else if (currentTypeFilter === 'OBSERVATION') { typeMatch = sat.details.type === 'Earth Observation'; }
             else if (currentTypeFilter === 'CAMERA') { typeMatch = !!sat.details.hasCamera; }
-            // Спутник видим, если соответствует обоим фильтрам
             sat.isVisible = orbitMatch && typeMatch;
 
-            // Обновляем видимость 3D объектов (плавно)
             const meshMaterial = sat.mesh.material as THREE.MeshBasicMaterial;
             const trackMaterial = sat.trackLine?.material as THREE.LineBasicMaterial;
             const targetOpacity = sat.isVisible ? 1.0 : 0.0;
@@ -148,9 +164,7 @@
 
             if (meshMaterial) {
                 meshMaterial.transparent = true;
-                // Используем lerp для более плавной анимации прозрачности
                 meshMaterial.opacity = THREE.MathUtils.lerp(meshMaterial.opacity, targetOpacity, 0.1);
-                // Скрываем меш совсем, если он почти прозрачен
                 sat.mesh.visible = meshMaterial.opacity > 0.05;
             }
             if (trackMaterial && sat.trackLine) {
@@ -163,8 +177,6 @@
     // --- КОНЕЦ ФУНКЦИИ ФИЛЬТРОВ ---
 
     // --- Реактивный вызов applyFilters при изменении props ---
-    // Этот блок будет вызываться при изменении orbitFilter или typeFilter
-    // Мы проверяем localSatelliteObjects, чтобы убедиться, что сцена инициализирована
     $: if(localSatelliteObjects && localSatelliteObjects.length > 0 && !isLoadingTLE) {
         applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
     }
@@ -202,6 +214,7 @@
 		function disposeMaterial(material: any) {
 			 if (!material) return;
 			 if (material.map?.dispose) material.map.dispose();
+             // Добавить другие карты текстур, если используются
 			 if (material.dispose) material.dispose();
 		}
 
@@ -212,24 +225,29 @@
 			const isHazard = ['High', 'Severe', 'Extreme'].includes(radiationRiskLevel);
 
 			localSatelliteObjects.forEach(sat => {
-				// Пропускаем спутники, которые не должны быть видимы по фильтру
-                // (проверка !sat.isVisible здесь не обязательна, т.к. applyFilters управляет mesh.visible)
-				if (!sat.mesh.visible && !sat.trackLine?.visible) return; // Пропускаем если и меш и трек невидимы
+				if (!sat.isVisible) {
+                    // Окончательно скрываем, если невидимый по фильтру
+                    if (sat.mesh.visible) sat.mesh.visible = false;
+                    if (sat.trackLine?.visible) sat.trackLine.visible = false;
+                    return;
+                };
 
 				try {
 					const posVel = satellite.propagate(sat.satrec, currentTime);
 					const posEci = posVel.position as satellite.EciVec3<number>;
 					if (!posEci) return;
 					const geo = satellite.eciToGeodetic(posEci, gmst);
+
+                    sat.currentLatRad = geo.latitude;
+                    sat.currentLonRad = geo.longitude;
+
 					const r = EARTH_RADIUS_SCENE + geo.height / SCALE_FACTOR;
 					const x = r * Math.cos(geo.latitude) * Math.cos(geo.longitude);
 					const y = r * Math.sin(geo.latitude);
 					const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
 
-                    // Обновляем позицию меша только если он видим
-                    if (sat.mesh.visible) {
-					    sat.mesh.position.set(x, y, z);
-                    }
+                    // Обновляем позицию меша (он уже видим из applyFilters)
+                    sat.mesh.position.set(x, y, z);
 
 					let targetColor = sat.defaultColor;
 					if (isHazard && Math.abs(geo.latitude) > highLat) { targetColor = HAZARD_COLOR; }
@@ -239,7 +257,7 @@
 					}
 				} catch (error: any) {
 					 if (error.message.includes('decay')) {
-						 if(sat.mesh.visible) console.warn(`Satellite ${sat.name} orbit decayed.`);
+						 if(sat.mesh.visible || sat.isVisible) console.warn(`Satellite ${sat.name} orbit decayed.`);
 						 sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false;
 					 } else {
 						 console.error(`Error propagating sat ${sat.name}:`, error);
@@ -255,10 +273,10 @@
 			}
 			animationFrameId = requestAnimationFrame(animate);
 
-            // Вызываем applyFilters здесь для плавной анимации прозрачности
-            applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
+			// Вызываем applyFilters здесь для плавной анимации прозрачности
+			applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
 
-			updateSatellitePositions(new Date()); // Обновляем позиции после фильтрации
+			updateSatellitePositions(new Date()); // Обновляем позиции
 			controlsInstance?.update();
 
             // Обновление Позиции Метки
@@ -268,13 +286,13 @@
                 if (satObject?.isVisible && satObject.mesh.visible) {
 					labelPositionVector.copy(satObject.mesh.position);
 					labelPositionVector.project(cameraInstance);
-					if (labelPositionVector.z < 1) {
+					if (labelPositionVector.z < 1) { // Проверка видимости
 						const screenX = (labelPositionVector.x + 1) / 2 * container.clientWidth;
 						const screenY = (-labelPositionVector.y + 1) / 2 * container.clientHeight;
 						labelInfo = { name: hoveredSatelliteName, x: screenX, y: screenY };
-					} else { labelInfo = null; }
-				} else { labelInfo = null; } // Скрываем метку, если спутник отфильтрован
-			} else { labelInfo = null; }
+					} else { labelInfo = null; } // Скрываем, если за экраном
+				} else { labelInfo = null; } // Скрываем, если спутник отфильтрован
+			} else { labelInfo = null; } // Скрываем, если нет наведения
 
 			rendererInstance.render(sceneInstance, cameraInstance);
 		}
@@ -309,6 +327,27 @@
 			 labelInfo = null;
 		 }
 
+        // --- ОБРАБОТЧИК КЛИКА ---
+        function onClick(event: MouseEvent) {
+             if (!isMounted || !container || !cameraInstance) return;
+             const rect = container.getBoundingClientRect();
+             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+             raycaster.setFromCamera(mouse, cameraInstance);
+             const visibleMeshes = localSatelliteMeshes.filter(m => m.visible);
+             const intersects = raycaster.intersectObjects(visibleMeshes);
+
+             if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) {
+                 const mesh = intersects[0].object;
+                 const clickedSat = localSatelliteObjects.find(s => s.mesh === mesh);
+                 if (clickedSat) {
+                     console.log("Clicked on:", clickedSat.name, clickedSat);
+                     dispatch('satelliteclick', { ...clickedSat }); // Отправляем копию
+                 }
+             }
+        }
+        // --- КОНЕЦ ОБРАБОТЧИКА КЛИКА ---
+
 		// Основная асинхронная часть инициализации
 		const init = async () => {
 			try {
@@ -342,14 +381,13 @@
 				localSatelliteObjects = []; // Очищаем перед заполнением
 				localSatelliteMeshes = []; // Очищаем перед заполнением
 				const initializationTime = new Date();
-
 				// Создание спутников и треков
 				fetchedTLEs.forEach(tle => {
 					 try {
 						 const satrec = satellite.twoline2satrec(tle.tle1, tle.tle2);
-						 const satGeometry = new THREE.SphereGeometry(0.08, 6, 6);
+						 const satGeometry = new THREE.SphereGeometry(0.08, 6, 6); // Mesh-сфера
 						 const satColor = tle.name.includes('ISS') ? DEFAULT_COLOR_ISS : DEFAULT_COLOR_OTHER;
-						 const satMaterial = new THREE.MeshBasicMaterial({ color: satColor, transparent: true, opacity: 1 });
+						 const satMaterial = new THREE.MeshBasicMaterial({ color: satColor, transparent: true, opacity: 1 }); // Делаем прозрачным для анимации
 						 const satMesh = new THREE.Mesh(satGeometry, satMaterial);
 						 const noradId = tle.tle1.substring(2, 7).trim();
 						 const details = getSatelliteDetails(noradId);
@@ -358,7 +396,7 @@
 						 const trackPoints = calculateTrackPoints(satrec, initializationTime);
 						 if (trackPoints.length > 1 && sceneInstance) {
 							const trackGeometry = new THREE.BufferGeometry().setFromPoints(trackPoints);
-							const trackMaterial = new THREE.LineBasicMaterial({ color: TRACK_COLOR, transparent: true, opacity: 0.4 });
+							const trackMaterial = new THREE.LineBasicMaterial({ color: TRACK_COLOR, transparent: true, opacity: 0.4 }); // Делаем прозрачным
 							trackLine = new THREE.Line(trackGeometry, trackMaterial);
 							sceneInstance.add(trackLine);
 						 }
@@ -372,11 +410,12 @@
 				// Применяем начальные фильтры ДО первого рендера
 				applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
 
-				isLoadingTLE = false; // Убираем лоадер
+				isLoadingTLE = false; // Все готово
 				animate(); // Запускаем главный цикл
 				window.addEventListener('resize', handleResize);
 				container.addEventListener('mousemove', onMouseMove);
 				container.addEventListener('mouseleave', onMouseLeave);
+                container.addEventListener('click', onClick); // Добавляем слушатель клика
 
 			} catch (error) {
 				 console.error('[SatelliteGlobe] Initialization failed:', error);
@@ -389,36 +428,38 @@
 
 		// Функция очистки
 		const cleanup = () => {
-			isMounted = false;
-			console.log('[SatelliteGlobe] Cleanup function running...');
-			if (animationFrameId) cancelAnimationFrame(animationFrameId);
-			window.removeEventListener('resize', handleResize);
-			if (container) {
-				container.removeEventListener('mousemove', onMouseMove);
-				container.removeEventListener('mouseleave', onMouseLeave);
-			}
-			controlsInstance?.dispose();
-			sceneInstance?.traverse(object => disposeObject(object));
-			sceneInstance?.clear();
-			rendererInstance?.dispose();
-			if (container && rendererInstance?.domElement?.parentNode === container) {
-				container.removeChild(rendererInstance.domElement);
-			}
-			 console.log('[SatelliteGlobe] Cleanup complete.');
-			 rendererInstance = null; sceneInstance = null; cameraInstance = null; controlsInstance = null;
-			 localSatelliteObjects = []; // Очищаем массив объектов при размонтировании
-		};
+            isMounted = false;
+            console.log('[SatelliteGlobe] Cleanup function running...');
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            window.removeEventListener('resize', handleResize);
+            if (container) {
+                container.removeEventListener('mousemove', onMouseMove);
+                container.removeEventListener('mouseleave', onMouseLeave);
+                container.removeEventListener('click', onClick); // Удаляем слушатель клика
+            }
+            controlsInstance?.dispose();
+            // Очистка ресурсов
+             sceneInstance?.traverse(object => disposeObject(object)); // Используем traverse с disposeObject
+             sceneInstance?.clear(); // Удаляем все из сцены
+             rendererInstance?.dispose(); // Освобождаем WebGL контекст
+            if (container && rendererInstance?.domElement?.parentNode === container) {
+                container.removeChild(rendererInstance.domElement); // Удаляем canvas
+            }
+             console.log('[SatelliteGlobe] Cleanup complete.');
+             // Обнуляем ссылки
+             rendererInstance = null; sceneInstance = null; cameraInstance = null; controlsInstance = null;
+             localSatelliteObjects = []; // Очищаем массив объектов при размонтировании
+        };
 		return cleanup; // Возвращаем функцию очистки для onDestroy
 
 	}); // Конец onMount
 
 </script>
 
-<!-- Шаблон (без изменений) -->
-<div class="w-full h-96 border dark:border-gray-700 rounded-lg overflow-hidden relative bg-black">
+<!-- Шаблон -->
+<div class="w-full h-[80vh] md:h-[75vh] lg:h-[80vh] border dark:border-gray-700 rounded-lg overflow-hidden relative bg-black">
 	{#if isLoadingTLE}
-        <!-- ВОЗВРАЩАЕМ КОД ЛОАДЕРА -->
-		<div class="absolute inset-0 flex items-center justify-center bg-gray-500/50 text-white z-10">
+        <div class="absolute inset-0 flex items-center justify-center bg-gray-500/50 text-white z-10">
 			 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
 				 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 				 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -426,31 +467,20 @@
 			Loading TLE Data...
 		</div>
 	{:else if tleError}
-        <!-- ВОЗВРАЩАЕМ КОД ОШИБКИ -->
-		<div class="absolute inset-0 flex items-center justify-center bg-red-800/80 text-white p-4 text-center z-10">
+        <div class="absolute inset-0 flex items-center justify-center bg-red-800/80 text-white p-4 text-center z-10">
 			Error: {tleError}
 		</div>
 	{/if}
-
-	<!-- Основной контейнер для рендерера -->
-	<div bind:this={container} class="w-full h-full cursor-grab">
-		<!-- Canvas Three.js будет здесь -->
-	</div>
-
-	<!-- HTML МЕТКА ДЛЯ ИМЕНИ -->
+	<div bind:this={container} class="w-full h-full cursor-grab"></div>
 	{#if labelInfo}
-		<div
-            class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap"
-            style:left="{labelInfo.x}px"
-            style:top="{labelInfo.y}px"
-            style="transform: translate(-50%, -130%); z-index: 20;"
-        >
+		<div class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap"
+             style:left="{labelInfo.x}px" style:top="{labelInfo.y}px" style="transform: translate(-50%, -130%); z-index: 20;">
 			{labelInfo.name}
 		</div>
 	{/if}
 </div>
 
 <style>
-	div[bind\:this] { min-height: 400px; }
+	div[bind\:this] { min-height: 400px; } /* Оставляем min-height на всякий случай */
 	.absolute { /* Стили для сообщений и метки */ }
 </style>
