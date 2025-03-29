@@ -2,20 +2,21 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<!-- Базовый путь для всех статических ассетов -->
+		<!-- Base path for all static assets -->
 		<link rel="icon" href="%sveltekit.assets%/favicon.ico" sizes="any" />
 		<link rel="icon" href="%sveltekit.assets%/favicon-32x32.png" type="image/png" sizes="32x32" />
 		<link rel="icon" href="%sveltekit.assets%/favicon-16x16.png" type="image/png" sizes="16x16" />
-		<!-- Иконка для Apple устройств -->
+		<!-- Icon for Apple devices -->
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
-		<!-- Иконки для Android Chrome и PWA -->
+		<!-- Icons for Android Chrome and PWA -->
 		<link rel="manifest" href="%sveltekit.assets%/site.webmanifest" />
-        <meta name="theme-color" content="#ffffff" /> <!-- Цвет темы для адресной строки (может быть в манифесте) -->
+        <meta name="theme-color" content="#ffffff" /> <!-- Theme color for browser UI (can also be in manifest) -->
 
 		<meta name="viewport" content="width=device-width" />
-		%sveltekit.head%
+		%sveltekit.head% <!-- SvelteKit managed head elements -->
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<!-- Display contents ensures the div doesn't interfere with layout -->
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
