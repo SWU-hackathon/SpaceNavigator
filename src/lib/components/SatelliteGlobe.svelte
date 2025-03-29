@@ -1,21 +1,18 @@
 <!-- src/lib/components/SatelliteGlobe.svelte -->
 
-<!-- МОДУЛЬНЫЙ СКРИПТ ДЛЯ ЭКСПОРТА ТИПОВ -->
 <script context="module" lang="ts">
-	import type * as THREE_TYPES from 'three'; // Импортируем типы Three.js
-	import type * as SATELLITE_TYPES from 'satellite.js'; // Импортируем типы satellite.js
-    // Импортируем типы из других компонентов/файлов
+	import type * as THREE_TYPES from 'three';
+	import type * as SATELLITE_TYPES from 'satellite.js';
     import type { SatelliteDetails } from '$lib/satellite-info';
 
-    // Определяем и экспортируем типы здесь
-    export type OrbitClassification = 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'Unknown';
+    export type OrbitClassification = 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'SSO' | 'Unknown';
 
 	export interface SatelliteObject {
 		name: string;
-		satrec: SATELLITE_TYPES.SatRec; // Используем импортированный тип
-		mesh: THREE_TYPES.Mesh; // Используем импортированный тип
+		satrec: SATELLITE_TYPES.SatRec;
+		mesh: THREE_TYPES.Mesh;
 		defaultColor: number;
-		trackLine?: THREE_TYPES.Line; // Используем импортированный тип
+		trackLine?: THREE_TYPES.Line;
 		details: SatelliteDetails;
 		orbitType: OrbitClassification;
 		isVisible: boolean;
@@ -24,33 +21,26 @@
 	}
 </script>
 
-<!-- ОСНОВНОЙ СКРИПТ КОМПОНЕНТА -->
 <script lang="ts">
 	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 	import * as THREE from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import * as satellite from 'satellite.js';
-	// Импорт справочника (функции)
 	import { getSatelliteDetails } from '$lib/satellite-info';
-	// Импорт типов фильтров
 	import type { OrbitFilter, TypeFilter } from './SatelliteFilter.svelte';
-    // Типы SatelliteObject и OrbitClassification доступны из context="module" выше
 
-	// --- Props ---
 	export let radiationRiskLevel: string = 'None';
 	export let orbitFilter: OrbitFilter = 'ALL';
 	export let typeFilter: TypeFilter = 'ALL';
 
-	// --- Состояния Компонента ---
 	let isLoadingTLE = true;
 	let tleError: string | null = null;
 	let hoveredSatelliteName: string | null = null;
 	let labelInfo: { name: string; x: number; y: number } | null = null;
+    let isFullscreen = false;
 
-	// --- Переменная для DOM-контейнера ---
 	let container: HTMLDivElement;
 
-	// --- Константы и Настройки ---
 	const EARTH_RADIUS_SCENE = 5;
 	const REAL_EARTH_RADIUS_KM = 6371;
 	const SCALE_FACTOR = REAL_EARTH_RADIUS_KM / EARTH_RADIUS_SCENE;
@@ -59,21 +49,9 @@
 	const HAZARD_COLOR = 0xff00ff;
 	const TRACK_COLOR = 0x888888;
 
-	// --- Локальный тип данных для TLE ---
-	interface FetchedTleData {
-		name: string;
-		tle1: string;
-		tle2: string;
-	}
-    // ------------------------------------
-
-    // Переменная для хранения объектов спутников
+	interface FetchedTleData { name: string; tle1: string; tle2: string; }
     let localSatelliteObjects: SatelliteObject[] = [];
-
-	// --- ДИСПЕТЧЕР СОБЫТИЙ ДЛЯ КЛИКА ---
     const dispatch = createEventDispatcher<{ satelliteclick: SatelliteObject; }>();
-
-	// --- Функции ---
 
 	async function loadTLEData(): Promise<FetchedTleData[]> {
 		console.log('[SatelliteGlobe] Fetching TLE from API...');
@@ -83,10 +61,9 @@
 			if (!response.ok) {
 				 let errorMsg = `Failed to fetch TLE: ${response.status}`;
 				 try { const errorData = await response.json(); errorMsg = errorData.message || errorMsg; }
-				 catch { /* ignore */ }
+				 catch { }
 				 throw new Error(errorMsg);
 			}
-            // Используем тип FetchedTleData
 			const data: FetchedTleData[] = await response.json();
 			 if (!Array.isArray(data)) { throw new Error('Invalid TLE data format received from API.'); }
 			console.log('[SatelliteGlobe] TLE data fetched successfully:', data.length);
@@ -117,13 +94,11 @@
                     const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
                     points.push(new THREE.Vector3(x, y, z));
                 }
-            } catch (e) { /* Игнорируем ошибки пропагации для точек трека */ }
+            } catch (e) { }
         }
-        // Тип THREE.Vector3[]
         return points;
     }
 
-    // Используем OrbitClassification
 	function classifyOrbit(satrec: satellite.SatRec): OrbitClassification {
         const meanMotionRadPerMin = satrec.no;
         const periodMinutes = (2 * Math.PI) / meanMotionRadPerMin;
@@ -133,24 +108,31 @@
         const semiMajorAxisKm = Math.cbrt(mu / (meanMotionRadPerSec * meanMotionRadPerSec));
         const altitudeKm = semiMajorAxisKm - REAL_EARTH_RADIUS_KM;
         const eccentricity = satrec.ecco;
+        const inclinationDeg = satrec.inclo * (180 / Math.PI);
 
         if (isNaN(periodMinutes) || isNaN(altitudeKm)) return 'Unknown';
 
         if (eccentricity > 0.25) { return 'HEO'; }
-        else if (Math.abs(periodMinutes - 1436.1) < 30) { return 'GEO'; }
+        else if (Math.abs(periodMinutes - 1436.1) < 30 && eccentricity < 0.1 && inclinationDeg < 5) { return 'GEO'; }
+        else if (altitudeKm < 2000 && Math.abs(inclinationDeg - 98) < 5) { return 'SSO'; }
         else if (altitudeKm < 2000) { return 'LEO'; }
         else if (altitudeKm >= 2000 && altitudeKm < 35700) { return 'MEO'; }
-        else { return altitudeKm >= 35700 ? 'GEO' : 'MEO'; }
+        else if (altitudeKm >= 35700 && eccentricity < 0.1) { return 'MEO'; }
+        else if (altitudeKm >= 35700) { return 'HEO'; }
+        else { return 'Unknown'; }
     }
 
-	// --- Функция Применения Фильтров ---
     function applyFilters(satellites: SatelliteObject[], currentOrbitFilter: OrbitFilter, currentTypeFilter: TypeFilter) {
         if (!satellites || satellites.length === 0) return;
         satellites.forEach(sat => {
             let orbitMatch = false; let typeMatch = false;
             if (currentOrbitFilter === 'ALL') { orbitMatch = true; }
             else if (currentOrbitFilter === 'LEO') { orbitMatch = sat.orbitType === 'LEO'; }
-            else if (currentOrbitFilter === 'MEO_GEO_HEO') { orbitMatch = ['MEO', 'GEO', 'HEO'].includes(sat.orbitType); }
+            else if (currentOrbitFilter === 'MEO') { orbitMatch = sat.orbitType === 'MEO'; }
+            else if (currentOrbitFilter === 'GEO') { orbitMatch = sat.orbitType === 'GEO'; }
+            else if (currentOrbitFilter === 'HEO') { orbitMatch = sat.orbitType === 'HEO'; }
+            else if (currentOrbitFilter === 'SSO') { orbitMatch = sat.orbitType === 'SSO'; }
+            else if (currentOrbitFilter === 'OTHER') { orbitMatch = sat.orbitType === 'Unknown'; }
             if (currentTypeFilter === 'ALL') { typeMatch = true; }
             else if (currentTypeFilter === 'ISS') { typeMatch = sat.details.type === 'ISS'; }
             else if (currentTypeFilter === 'OBSERVATION') { typeMatch = sat.details.type === 'Earth Observation'; }
@@ -174,16 +156,32 @@
             }
         });
     }
-    // --- КОНЕЦ ФУНКЦИИ ФИЛЬТРОВ ---
 
-    // --- Реактивный вызов applyFilters при изменении props ---
+    function handleFSError(err: Error) { console.error(`Fullscreen Error: ${err.message} (${err.name})`); }
+    function toggleFullscreen() {
+        if (!container) return;
+        const doc = document as Document & { webkitExitFullscreen?: () => Promise<void>; mozCancelFullScreen?: () => Promise<void>; msExitFullscreen?: () => Promise<void>; };
+        const cont = container as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void>; mozRequestFullScreen?: () => Promise<void>; msRequestFullscreen?: () => Promise<void>; };
+        const isCurrentlyFullscreen = !!(doc.fullscreenElement || (doc as any).webkitFullscreenElement || (doc as any).mozFullScreenElement || (doc as any).msFullscreenElement);
+
+        if (!isCurrentlyFullscreen) {
+            if (cont.requestFullscreen) { cont.requestFullscreen().catch(handleFSError); }
+            else if (cont.mozRequestFullScreen) { cont.mozRequestFullScreen().catch(handleFSError); }
+            else if (cont.webkitRequestFullscreen) { (cont as any).webkitRequestFullscreen((Element as any).ALLOW_KEYBOARD_INPUT).catch(handleFSError); }
+            else if (cont.msRequestFullscreen) { cont.msRequestFullscreen().catch(handleFSError); }
+        } else {
+            if (doc.exitFullscreen) { doc.exitFullscreen().catch(handleFSError); }
+            else if (doc.mozCancelFullScreen) { doc.mozCancelFullScreen().catch(handleFSError); }
+            else if (doc.webkitExitFullscreen) { doc.webkitExitFullscreen().catch(handleFSError); }
+            else if (doc.msExitFullscreen) { doc.msExitFullscreen().catch(handleFSError); }
+        }
+    }
+
     $: if(localSatelliteObjects && localSatelliteObjects.length > 0 && !isLoadingTLE) {
         applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
     }
-    // -----------------------------------------------------
 
 
-	// --- Инициализация и Очистка ---
 	onMount(() => {
 		if (!container) {
 			console.error("[SatelliteGlobe] onMount: Container div not found!");
@@ -195,8 +193,7 @@
 		let isMounted = true; let animationFrameId: number;
 		let rendererInstance: THREE.WebGLRenderer | null = null; let sceneInstance: THREE.Scene | null = null;
 		let cameraInstance: THREE.PerspectiveCamera | null = null; let controlsInstance: OrbitControls | null = null;
-		// Массив мешей нужен только локально
-        let localSatelliteMeshes: THREE.Mesh[] = [];
+		let localSatelliteMeshes: THREE.Mesh[] = [];
 
 		const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2(); const labelPositionVector = new THREE.Vector3();
 
@@ -214,7 +211,6 @@
 		function disposeMaterial(material: any) {
 			 if (!material) return;
 			 if (material.map?.dispose) material.map.dispose();
-             // Добавить другие карты текстур, если используются
 			 if (material.dispose) material.dispose();
 		}
 
@@ -225,83 +221,58 @@
 			const isHazard = ['High', 'Severe', 'Extreme'].includes(radiationRiskLevel);
 
 			localSatelliteObjects.forEach(sat => {
-				if (!sat.isVisible) {
-                    // Окончательно скрываем, если невидимый по фильтру
-                    if (sat.mesh.visible) sat.mesh.visible = false;
-                    if (sat.trackLine?.visible) sat.trackLine.visible = false;
-                    return;
-                };
-
+				if (!sat.isVisible) { if (sat.mesh.visible) sat.mesh.visible = false; if (sat.trackLine?.visible) sat.trackLine.visible = false; return; };
 				try {
 					const posVel = satellite.propagate(sat.satrec, currentTime);
 					const posEci = posVel.position as satellite.EciVec3<number>;
 					if (!posEci) return;
 					const geo = satellite.eciToGeodetic(posEci, gmst);
-
-                    sat.currentLatRad = geo.latitude;
-                    sat.currentLonRad = geo.longitude;
-
+                    sat.currentLatRad = geo.latitude; sat.currentLonRad = geo.longitude;
 					const r = EARTH_RADIUS_SCENE + geo.height / SCALE_FACTOR;
 					const x = r * Math.cos(geo.latitude) * Math.cos(geo.longitude);
 					const y = r * Math.sin(geo.latitude);
 					const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
-
-                    // Обновляем позицию меша (он уже видим из applyFilters)
                     sat.mesh.position.set(x, y, z);
-
 					let targetColor = sat.defaultColor;
 					if (isHazard && Math.abs(geo.latitude) > highLat) { targetColor = HAZARD_COLOR; }
 					const material = sat.mesh.material as THREE.MeshBasicMaterial;
-					if (material?.color && material.color.getHex() !== targetColor) {
-						 material.color.setHex(targetColor);
-					}
+					if (material?.color && material.color.getHex() !== targetColor) { material.color.setHex(targetColor); }
 				} catch (error: any) {
-					 if (error.message.includes('decay')) {
-						 if(sat.mesh.visible || sat.isVisible) console.warn(`Satellite ${sat.name} orbit decayed.`);
-						 sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false;
-					 } else {
-						 console.error(`Error propagating sat ${sat.name}:`, error);
-						 sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false;
-					 }
+					 if (error.message.includes('decay')) { if(sat.mesh.visible || sat.isVisible) console.warn(`Satellite ${sat.name} orbit decayed.`); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; }
+					 else { console.error(`Error propagating sat ${sat.name}:`, error); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; }
 				 }
 			});
 		}
 
 		function animate() {
-			if (!isMounted || !rendererInstance || !sceneInstance || !cameraInstance) {
-				 if(animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = 0; return;
-			}
+			if (!isMounted || !rendererInstance || !sceneInstance || !cameraInstance) { if(animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = 0; return; }
 			animationFrameId = requestAnimationFrame(animate);
-
-			// Вызываем applyFilters здесь для плавной анимации прозрачности
 			applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
-
-			updateSatellitePositions(new Date()); // Обновляем позиции
+			updateSatellitePositions(new Date());
 			controlsInstance?.update();
-
-            // Обновление Позиции Метки
+            // --- Обновление Позиции Метки (полный код) ---
 			if (hoveredSatelliteName && container && cameraInstance) {
 				const satObject = localSatelliteObjects.find(s => s.name === hoveredSatelliteName);
-				// Метка показывается только для видимых спутников
                 if (satObject?.isVisible && satObject.mesh.visible) {
 					labelPositionVector.copy(satObject.mesh.position);
 					labelPositionVector.project(cameraInstance);
-					if (labelPositionVector.z < 1) { // Проверка видимости
+					if (labelPositionVector.z < 1) {
 						const screenX = (labelPositionVector.x + 1) / 2 * container.clientWidth;
 						const screenY = (-labelPositionVector.y + 1) / 2 * container.clientHeight;
 						labelInfo = { name: hoveredSatelliteName, x: screenX, y: screenY };
-					} else { labelInfo = null; } // Скрываем, если за экраном
-				} else { labelInfo = null; } // Скрываем, если спутник отфильтрован
-			} else { labelInfo = null; } // Скрываем, если нет наведения
-
+					} else { labelInfo = null; }
+				} else { labelInfo = null; }
+			} else { labelInfo = null; }
+            // ------------------------------------------
 			rendererInstance.render(sceneInstance, cameraInstance);
 		}
 
 		function handleResize() {
 			 if (!isMounted || !container || !rendererInstance || !cameraInstance) return;
-			 cameraInstance.aspect = container.clientWidth / container.clientHeight;
+			 const width = container.clientWidth; const height = container.clientHeight;
+			 cameraInstance.aspect = width / height;
 			 cameraInstance.updateProjectionMatrix();
-			 rendererInstance.setSize(container.clientWidth, container.clientHeight);
+			 rendererInstance.setSize(width, height);
 		 }
 
 		 function onMouseMove(event: MouseEvent) {
@@ -310,7 +281,6 @@
 			 mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
 			 mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 			 raycaster.setFromCamera(mouse, cameraInstance);
-             // Ищем пересечения ТОЛЬКО с видимыми мешами
 			 const visibleMeshes = localSatelliteMeshes.filter(m => m.visible);
 			 const intersects = raycaster.intersectObjects(visibleMeshes);
 			 if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) {
@@ -327,7 +297,6 @@
 			 labelInfo = null;
 		 }
 
-        // --- ОБРАБОТЧИК КЛИКА ---
         function onClick(event: MouseEvent) {
              if (!isMounted || !container || !cameraInstance) return;
              const rect = container.getBoundingClientRect();
@@ -336,58 +305,46 @@
              raycaster.setFromCamera(mouse, cameraInstance);
              const visibleMeshes = localSatelliteMeshes.filter(m => m.visible);
              const intersects = raycaster.intersectObjects(visibleMeshes);
-
              if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) {
                  const mesh = intersects[0].object;
                  const clickedSat = localSatelliteObjects.find(s => s.mesh === mesh);
                  if (clickedSat) {
-                     console.log("Clicked on:", clickedSat.name, clickedSat);
-                     dispatch('satelliteclick', { ...clickedSat }); // Отправляем копию
+                     dispatch('satelliteclick', { ...clickedSat });
                  }
              }
         }
-        // --- КОНЕЦ ОБРАБОТЧИКА КЛИКА ---
 
-		// Основная асинхронная часть инициализации
+         function handleFullscreenChange() {
+             const doc = document as Document & { webkitFullscreenElement?: Element; mozFullScreenElement?: Element; msFullscreenElement?: Element; };
+             isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+             setTimeout(handleResize, 150);
+         }
+
 		const init = async () => {
 			try {
 				const fetchedTLEs = await loadTLEData();
 				if (!isMounted || !container) return;
-				if (fetchedTLEs.length === 0) {
-					 tleError = tleError || "No satellite TLE data loaded or found.";
-					 isLoadingTLE = false; return;
-				}
-
-				// Инициализация Three.js
-				sceneInstance = new THREE.Scene();
-				cameraInstance = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-				cameraInstance.position.z = EARTH_RADIUS_SCENE * 3;
-				rendererInstance = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-				rendererInstance.setSize(container.clientWidth, container.clientHeight);
-				rendererInstance.setPixelRatio(window.devicePixelRatio);
+				if (fetchedTLEs.length === 0) { isLoadingTLE = false; return; }
+				sceneInstance = new THREE.Scene(); cameraInstance = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000); cameraInstance.position.z = EARTH_RADIUS_SCENE * 3;
+                rendererInstance = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }); rendererInstance.setSize(container.clientWidth, container.clientHeight); rendererInstance.setPixelRatio(window.devicePixelRatio);
 				while (container.firstChild) { container.removeChild(container.firstChild); }
 				container.appendChild(rendererInstance.domElement);
 				const ambientLight = new THREE.AmbientLight(0x808080); sceneInstance.add(ambientLight);
 				const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); directionalLight.position.set(5, 5, 5); sceneInstance.add(directionalLight);
-				const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS_SCENE, 64, 32);
-				const textureLoader = new THREE.TextureLoader();
+				const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS_SCENE, 64, 32); const textureLoader = new THREE.TextureLoader();
 				const earthMaterial = new THREE.MeshPhongMaterial({ map: textureLoader.load('/textures/earth_daymap.jpg', undefined, undefined, (err) => { console.error("Failed to load earth texture!", err); tleError="Texture load failed."; isLoadingTLE=false; }), specular: 0x111111, shininess: 5 });
-				const earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
-				sceneInstance.add(earthMesh);
-				controlsInstance = new OrbitControls(cameraInstance, rendererInstance.domElement);
-				controlsInstance.enableDamping = true; controlsInstance.minDistance = EARTH_RADIUS_SCENE * 1.1; controlsInstance.maxDistance = EARTH_RADIUS_SCENE * 15;
+				const earthMesh = new THREE.Mesh(earthGeometry, earthMaterial); sceneInstance.add(earthMesh);
+				controlsInstance = new OrbitControls(cameraInstance, rendererInstance.domElement); controlsInstance.enableDamping = true; controlsInstance.minDistance = EARTH_RADIUS_SCENE * 1.1; controlsInstance.maxDistance = EARTH_RADIUS_SCENE * 15;
                 controlsInstance.rotateSpeed = 0.5; controlsInstance.zoomSpeed = 0.8; controlsInstance.panSpeed = 0.5;
 
-				localSatelliteObjects = []; // Очищаем перед заполнением
-				localSatelliteMeshes = []; // Очищаем перед заполнением
-				const initializationTime = new Date();
-				// Создание спутников и треков
+				localSatelliteObjects = []; localSatelliteMeshes = [];
+                const initializationTime = new Date();
 				fetchedTLEs.forEach(tle => {
 					 try {
 						 const satrec = satellite.twoline2satrec(tle.tle1, tle.tle2);
-						 const satGeometry = new THREE.SphereGeometry(0.08, 6, 6); // Mesh-сфера
+						 const satGeometry = new THREE.SphereGeometry(0.08, 6, 6);
 						 const satColor = tle.name.includes('ISS') ? DEFAULT_COLOR_ISS : DEFAULT_COLOR_OTHER;
-						 const satMaterial = new THREE.MeshBasicMaterial({ color: satColor, transparent: true, opacity: 1 }); // Делаем прозрачным для анимации
+						 const satMaterial = new THREE.MeshBasicMaterial({ color: satColor, transparent: true, opacity: 1 });
 						 const satMesh = new THREE.Mesh(satGeometry, satMaterial);
 						 const noradId = tle.tle1.substring(2, 7).trim();
 						 const details = getSatelliteDetails(noradId);
@@ -396,27 +353,26 @@
 						 const trackPoints = calculateTrackPoints(satrec, initializationTime);
 						 if (trackPoints.length > 1 && sceneInstance) {
 							const trackGeometry = new THREE.BufferGeometry().setFromPoints(trackPoints);
-							const trackMaterial = new THREE.LineBasicMaterial({ color: TRACK_COLOR, transparent: true, opacity: 0.4 }); // Делаем прозрачным
+							const trackMaterial = new THREE.LineBasicMaterial({ color: TRACK_COLOR, transparent: true, opacity: 0.4 });
 							trackLine = new THREE.Line(trackGeometry, trackMaterial);
 							sceneInstance.add(trackLine);
 						 }
-                         // Добавляем в локальные массивы
 						 localSatelliteObjects.push({ name: tle.name, satrec, mesh: satMesh, defaultColor: satColor, trackLine: trackLine, details: details, orbitType: orbitType, isVisible: true });
 						 localSatelliteMeshes.push(satMesh);
 						 sceneInstance?.add(satMesh);
 					 } catch (e) { console.error(`Error initializing sat ${tle.name}:`, e); }
 				 });
-
-				// Применяем начальные фильтры ДО первого рендера
 				applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
-
-				isLoadingTLE = false; // Все готово
-				animate(); // Запускаем главный цикл
+                isLoadingTLE = false;
+				animate();
 				window.addEventListener('resize', handleResize);
 				container.addEventListener('mousemove', onMouseMove);
 				container.addEventListener('mouseleave', onMouseLeave);
-                container.addEventListener('click', onClick); // Добавляем слушатель клика
-
+                container.addEventListener('click', onClick);
+                document.addEventListener('fullscreenchange', handleFullscreenChange);
+                document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+                document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+                document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 			} catch (error) {
 				 console.error('[SatelliteGlobe] Initialization failed:', error);
 				 if (!tleError) tleError = "Failed to initialize 3D scene.";
@@ -424,9 +380,8 @@
 			}
 		};
 
-		init(); // Запускаем
+		init();
 
-		// Функция очистки
 		const cleanup = () => {
             isMounted = false;
             console.log('[SatelliteGlobe] Cleanup function running...');
@@ -435,29 +390,30 @@
             if (container) {
                 container.removeEventListener('mousemove', onMouseMove);
                 container.removeEventListener('mouseleave', onMouseLeave);
-                container.removeEventListener('click', onClick); // Удаляем слушатель клика
+                container.removeEventListener('click', onClick);
             }
+            document.removeEventListener('fullscreenchange', handleFullscreenChange);
+            document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+            document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+            document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
             controlsInstance?.dispose();
-            // Очистка ресурсов
-             sceneInstance?.traverse(object => disposeObject(object)); // Используем traverse с disposeObject
-             sceneInstance?.clear(); // Удаляем все из сцены
-             rendererInstance?.dispose(); // Освобождаем WebGL контекст
+            sceneInstance?.traverse(object => disposeObject(object));
+            sceneInstance?.clear();
+            rendererInstance?.dispose();
             if (container && rendererInstance?.domElement?.parentNode === container) {
-                container.removeChild(rendererInstance.domElement); // Удаляем canvas
+                container.removeChild(rendererInstance.domElement);
             }
              console.log('[SatelliteGlobe] Cleanup complete.');
-             // Обнуляем ссылки
              rendererInstance = null; sceneInstance = null; cameraInstance = null; controlsInstance = null;
-             localSatelliteObjects = []; // Очищаем массив объектов при размонтировании
+             localSatelliteObjects = [];
         };
-		return cleanup; // Возвращаем функцию очистки для onDestroy
+		return cleanup;
 
-	}); // Конец onMount
+	});
 
 </script>
 
-<!-- Шаблон -->
-<div class="w-full h-[80vh] md:h-[75vh] lg:h-[80vh] border dark:border-gray-700 rounded-lg overflow-hidden relative bg-black">
+<div class="w-full h-full border dark:border-gray-700 rounded-lg overflow-hidden relative bg-black">
 	{#if isLoadingTLE}
         <div class="absolute inset-0 flex items-center justify-center bg-gray-500/50 text-white z-10">
 			 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -471,16 +427,37 @@
 			Error: {tleError}
 		</div>
 	{/if}
-	<div bind:this={container} class="w-full h-full cursor-grab"></div>
+	<div bind:this={container} class="w-full h-full cursor-grab">
+	</div>
 	{#if labelInfo}
-		<div class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap"
-             style:left="{labelInfo.x}px" style:top="{labelInfo.y}px" style="transform: translate(-50%, -130%); z-index: 20;">
+		<div
+            class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap"
+            style:left="{labelInfo.x}px" style:top="{labelInfo.y}px" style="transform: translate(-50%, -130%); z-index: 20;"
+        >
 			{labelInfo.name}
 		</div>
 	{/if}
+    {#if !isLoadingTLE && !tleError}
+    <button
+        on:click={toggleFullscreen}
+        class="absolute bottom-3 right-3 z-10 p-1.5 bg-black bg-opacity-40 text-white rounded-md hover:bg-opacity-60 focus:outline-none focus:ring-2 focus:ring-white"
+        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+    >
+        {#if isFullscreen}
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /> </svg>
+        {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m4.5 11.25v-4.5m0 4.5h-4.5m4.5 0L15 15" /> </svg>
+        {/if}
+    </button>
+    {/if}
 </div>
-
 <style>
-	div[bind\:this] { min-height: 400px; } /* Оставляем min-height на всякий случай */
-	.absolute { /* Стили для сообщений и метки */ }
+	div[bind\:this] { }
+	.absolute { }
+     div[bind\:this] :global(canvas) {
+         display: block;
+         width: 100%;
+         height: 100%;
+     }
 </style>

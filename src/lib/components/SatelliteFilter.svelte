@@ -1,66 +1,72 @@
 <!-- src/lib/components/SatelliteFilter.svelte -->
-
-<!-- Блок для экспорта типов и констант -->
 <script context="module" lang="ts">
-	// Определяем и ЭКСПОРТИРУЕМ типы фильтров здесь
-	export type OrbitFilter = 'ALL' | 'LEO' | 'MEO_GEO_HEO';
+	// --- ОБНОВЛЕННЫЕ ТИПЫ ОРБИТ ---
+	export type OrbitFilter = 'ALL' | 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'SSO' | 'OTHER'; // Добавили SSO, разделили MEO/GEO/HEO
+	// --------------------------------
+
 	export type TypeFilter = 'ALL' | 'ISS' | 'OBSERVATION' | 'CAMERA';
 </script>
 
-<!-- Основной блок скрипта для логики компонента -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	// Типы OrbitFilter и TypeFilter доступны здесь из context="module"
+	// Типы доступны из context="module"
 
 	// Состояние фильтров
 	let selectedOrbitFilter: OrbitFilter = 'ALL';
 	let selectedTypeFilter: TypeFilter = 'ALL';
 
-	// Диспетчер событий
-	const dispatch = createEventDispatcher<{
-		filterchange: { orbit: OrbitFilter; type: TypeFilter };
-	}>();
+	const dispatch = createEventDispatcher<{ filterchange: { orbit: OrbitFilter; type: TypeFilter }; }>();
 
-	// Обработка изменений
-	function handleFilterChange() {
-		dispatch('filterchange', {
-			orbit: selectedOrbitFilter,
-			type: selectedTypeFilter
-		});
-	}
+	function handleFilterChange() { dispatch('filterchange', { orbit: selectedOrbitFilter, type: selectedTypeFilter }); }
 
 	// Реактивность
 	$: selectedOrbitFilter, selectedTypeFilter, handleFilterChange();
 
-    // Стили кнопок
-    const baseClass = "px-3 py-1 text-sm rounded-md border transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800";
-    const activeClass = "bg-blue-600 text-white border-blue-700 dark:bg-blue-500 dark:border-blue-600 focus:ring-blue-500";
-    const inactiveClass = "bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 focus:ring-gray-400";
+    // Опции для выпадающих списков
+    const orbitOptions: { value: OrbitFilter, label: string }[] = [
+        { value: 'ALL', label: 'All Orbits' },
+        { value: 'LEO', label: 'Low Earth (LEO)' },
+        { value: 'MEO', label: 'Medium Earth (MEO)' },
+        { value: 'GEO', label: 'Geostationary (GEO)' },
+        { value: 'HEO', label: 'Highly Elliptical (HEO)' },
+        { value: 'SSO', label: 'Sun-Synchronous (SSO)' },
+        { value: 'OTHER', label: 'Other/Unknown' }
+    ];
+
+     const typeOptions: { value: TypeFilter, label: string }[] = [
+         { value: 'ALL', label: 'All Types' },
+         { value: 'ISS', label: 'ISS' },
+         { value: 'OBSERVATION', label: 'Earth Observation' },
+         { value: 'CAMERA', label: 'With Camera' }
+     ];
+
+     // Базовые стили для select
+     const selectBaseClass = "mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm";
 
 </script>
 
-<!-- Шаблон (HTML) -->
-<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6">
-	<h3 class="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Satellite Filters</h3>
-	<div class="space-y-4">
+<!-- ИСПОЛЬЗУЕМ <select> ВМЕСТО КНОПОК -->
+<div class="bg-white dark:bg-gray-800 bg-opacity-80 dark:bg-opacity-80 backdrop-blur-sm p-3 rounded-lg shadow-md w-64"> <!-- Сделали компактнее и полупрозрачным -->
+	<h3 class="text-md font-semibold mb-2 text-gray-900 dark:text-gray-100">Filters</h3>
+	<div class="space-y-3">
 		<!-- Фильтр по типу орбиты -->
 		<div>
-			<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Orbit Type:</label>
-			<div class="flex flex-wrap gap-2">
-				<button class="{baseClass} {selectedOrbitFilter === 'ALL' ? activeClass : inactiveClass}" on:click={() => selectedOrbitFilter = 'ALL'}>All Orbits</button>
-				<button class="{baseClass} {selectedOrbitFilter === 'LEO' ? activeClass : inactiveClass}" on:click={() => selectedOrbitFilter = 'LEO'}>LEO</button>
-				<button class="{baseClass} {selectedOrbitFilter === 'MEO_GEO_HEO' ? activeClass : inactiveClass}" on:click={() => selectedOrbitFilter = 'MEO_GEO_HEO'}>MEO/GEO/HEO</button>
-			</div>
+			<label for="orbit-filter" class="block text-xs font-medium text-gray-600 dark:text-gray-300">Orbit Type:</label>
+			<select id="orbit-filter" bind:value={selectedOrbitFilter} class={selectBaseClass}>
+                {#each orbitOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                {/each}
+			</select>
 		</div>
-		<!-- Фильтр по типу/камере -->
+
+		<!-- Фильтр по типу спутника/камере -->
 		<div>
-			<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Satellite Type / Feature:</label>
-			<div class="flex flex-wrap gap-2">
-				<button class="{baseClass} {selectedTypeFilter === 'ALL' ? activeClass : inactiveClass}" on:click={() => selectedTypeFilter = 'ALL'}>All Types</button>
-                <button class="{baseClass} {selectedTypeFilter === 'ISS' ? activeClass : inactiveClass}" on:click={() => selectedTypeFilter = 'ISS'}>ISS</button>
-				<button class="{baseClass} {selectedTypeFilter === 'OBSERVATION' ? activeClass : inactiveClass}" on:click={() => selectedTypeFilter = 'OBSERVATION'}>Earth Observation</button>
-                <button class="{baseClass} {selectedTypeFilter === 'CAMERA' ? activeClass : inactiveClass}" on:click={() => selectedTypeFilter = 'CAMERA'}>With Camera</button>
-			</div>
+			<label for="type-filter" class="block text-xs font-medium text-gray-600 dark:text-gray-300">Satellite Type:</label>
+			<select id="type-filter" bind:value={selectedTypeFilter} class={selectBaseClass}>
+                {#each typeOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                {/each}
+			</select>
 		</div>
 	</div>
 </div>
