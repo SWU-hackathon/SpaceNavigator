@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">space-navigator</string>
-    <string name="title_activity_main">space-navigator</string>
-    <string name="package_name">com.swuteam.spacenavigator</string>
-    <string name="custom_url_scheme">com.swuteam.spacenavigator</string>
-</resources>
