@@ -10,7 +10,8 @@
 	import ErrorMessage from '$lib/components/ErrorMessage.svelte';
 	import SatelliteGlobe from '$lib/components/SatelliteGlobe.svelte';
 	import SatelliteFilter from '$lib/components/SatelliteFilter.svelte'; // Импортируем Фильтр
-	import type { OrbitFilter, TypeFilter } from '$lib/components/SatelliteFilter.svelte'; // Импортируем типы фильтров
+	// Импортируем типы фильтров ИЗ МОДУЛЯ ФИЛЬТРА
+	import type { OrbitFilter, TypeFilter } from '$lib/components/SatelliteFilter.svelte';
 
 	// Получаем данные (weatherData и error) из функции load в +page.ts
 	export let data: PageData;
@@ -72,13 +73,15 @@
 					<h2 class="text-2xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
 						Live Satellite Tracker (3D View)
 					</h2>
-					{#key activeOrbitFilter + activeTypeFilter} <!-- Добавляем #key для возможного пересоздания при смене фильтра, если понадобится -->
+					<!-- Используем #key для принудительного пересоздания глобуса при смене фильтра -->
+                    <!-- Это гарантирует, что applyFilters сработает с новым prop ДО первой анимации -->
+					<!-- {#key activeOrbitFilter + activeTypeFilter}-->
 						<SatelliteGlobe
 							radiationRiskLevel={interpretation.currentConditions.radiationStorm}
 							orbitFilter={activeOrbitFilter}
 							typeFilter={activeTypeFilter}
 						/>
-					{/key}
+					<!-- {/key}-->
 				</div>
 			</div>
 
@@ -100,5 +103,5 @@
 
 <style lang="postcss">
 	 :global(body) { @apply bg-gray-100 dark:bg-gray-900 transition-colors duration-200; }
-	 @screen lg { .sticky { /* ... */ } }
+	 @screen lg { .sticky { /* Стили для липкого блока */ } }
 </style>

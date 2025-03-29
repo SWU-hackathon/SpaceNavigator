@@ -1,6 +1,6 @@
 <!-- src/lib/components/SatelliteFilter.svelte -->
 
-<!-- Блок для экспорта типов и констант (виден при импорте) -->
+<!-- Блок для экспорта типов и констант -->
 <script context="module" lang="ts">
 	// Определяем и ЭКСПОРТИРУЕМ типы фильтров здесь
 	export type OrbitFilter = 'ALL' | 'LEO' | 'MEO_GEO_HEO';
@@ -10,11 +10,9 @@
 <!-- Основной блок скрипта для логики компонента -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	// Импортируем типы из нашего же <script context="module">
-	// Это необязательно внутри того же файла, но для ясности можно оставить
-	// import type { OrbitFilter, TypeFilter } from './SatelliteFilter.svelte';
+	// Типы OrbitFilter и TypeFilter доступны здесь из context="module"
 
-	// Состояние фильтров (типы OrbitFilter и TypeFilter теперь доступны)
+	// Состояние фильтров
 	let selectedOrbitFilter: OrbitFilter = 'ALL';
 	let selectedTypeFilter: TypeFilter = 'ALL';
 
@@ -41,7 +39,7 @@
 
 </script>
 
-<!-- Шаблон (HTML) остается без изменений -->
+<!-- Шаблон (HTML) -->
 <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-6">
 	<h3 class="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Satellite Filters</h3>
 	<div class="space-y-4">
