@@ -53,6 +53,7 @@
 				<SatelliteGlobe
 					radiationRiskLevel={interpretation.currentConditions.radiationStorm}
                     on:satelliteclick={handleSatelliteClick}
+
 				/>
 			</div>
              <!-- ФИЛЬТР УБРАН ОТСЮДА -->
