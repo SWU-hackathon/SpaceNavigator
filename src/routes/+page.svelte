@@ -6,56 +6,60 @@
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import ErrorMessage from '$lib/components/ErrorMessage.svelte';
 	import SatelliteGlobe, { type SatelliteObject } from '$lib/components/SatelliteGlobe.svelte';
-	import SatelliteFilter from '$lib/components/SatelliteFilter.svelte';
-	import type { OrbitFilter, TypeFilter } from '$lib/components/SatelliteFilter.svelte';
+	// УБИРАЕМ ИМПОРТ ФИЛЬТРА ЗДЕСЬ
+	// import SatelliteFilter from '$lib/components/SatelliteFilter.svelte';
+	// import type { OrbitFilter, TypeFilter } from '$lib/components/SatelliteFilter.svelte';
     import SatInfoPanel from '$lib/components/SatInfoPanel.svelte';
 
 	export let data: PageData;
-	$: weather = data.weatherData;
-	$: error = data.error;
-	$: interpretation = data.weatherData?.interpretation;
-	$: notifications = data.weatherData?.notifications;
-	$: lastUpdated = data.weatherData?.lastUpdated;
+	$: weather = data.weatherData; $: error = data.error; $: interpretation = data.weatherData?.interpretation;
+	$: notifications = data.weatherData?.notifications; $: lastUpdated = data.weatherData?.lastUpdated;
 
-	let activeOrbitFilter: OrbitFilter = 'ALL';
-	let activeTypeFilter: TypeFilter = 'ALL';
+    // УБИРАЕМ СОСТОЯНИЕ ФИЛЬТРОВ ЗДЕСЬ (управляется внутри SatelliteGlobe)
+	// let activeOrbitFilter: OrbitFilter = 'ALL';
+	// let activeTypeFilter: TypeFilter = 'ALL';
     let selectedSatelliteInfo: SatelliteObject | null = null;
 
-	function handleFilterUpdate(event: CustomEvent<{ orbit: OrbitFilter; type: TypeFilter }>) {
-		activeOrbitFilter = event.detail.orbit;
-		activeTypeFilter = event.detail.type;
-        selectedSatelliteInfo = null;
-	}
+    // УБИРАЕМ handleFilterUpdate
+	// function handleFilterUpdate(event: CustomEvent<{ orbit: OrbitFilter; type: TypeFilter }>) { ... }
+
     function handleSatelliteClick(event: CustomEvent<SatelliteObject>) {
         selectedSatelliteInfo = event.detail;
     }
 
     function formatDateTime(isoString: string | undefined): string {
 		if (!isoString) return 'N/A';
-		try {
-			return new Date(isoString).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-		} catch (e) { console.error("Error formatting date:", e); return 'Invalid Date'; }
+		try { return new Date(isoString).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+        catch (e) { console.error("Error formatting date:", e); return 'Invalid Date'; }
 	}
 </script>
 
-<main class="w-full">
+<!-- Добавили padding обратно -->
+<main class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-7xl relative">
+	<header class="mb-6">
+		<h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-gray-100">
+			Space Weather & Satellite Tracker
+		</h1>
+		{#if lastUpdated} <p class="text-sm text-gray-500 dark:text-gray-400"> Weather data last updated: {formatDateTime(lastUpdated)} </p> {/if}
+	</header>
+
 	{#if error}
-         <div class="px-4 sm:px-6 lg:px-8 pt-4"><ErrorMessage message={error} /></div>
+         <ErrorMessage message={error} />
 	{:else if weather && interpretation}
-		<div class="relative w-full">
-			<div class="h-[calc(100vh-3rem)] w-full bg-black">
+        <!-- Блок с глобусом (фиксированная высота) -->
+		<div class="relative mb-6">
+            <!-- Высота ЗАДАНА ЗДЕСЬ, а не внутри глобуса -->
+			<div class="h-[75vh] w-full bg-black rounded-lg overflow-hidden shadow-lg border dark:border-gray-700">
 				<SatelliteGlobe
 					radiationRiskLevel={interpretation.currentConditions.radiationStorm}
-					orbitFilter={activeOrbitFilter}
-					typeFilter={activeTypeFilter}
                     on:satelliteclick={handleSatelliteClick}
 				/>
 			</div>
-            <div class="absolute top-4 left-4 z-10 opacity-90 hover:opacity-100 transition-opacity">
-                <SatelliteFilter on:filterchange={handleFilterUpdate} />
-            </div>
+             <!-- ФИЛЬТР УБРАН ОТСЮДА -->
 		</div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 px-4 sm:px-6 lg:px-8 py-6">
+
+        <!-- Секция с контентом (прокручивается под глобусом) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
              <div class="lg:col-span-2 space-y-6">
 				<InterpretationCard data={interpretation} />
 				<AerospaceImpact data={interpretation.potentialImpacts} />
@@ -66,15 +70,22 @@
 				</div>
             </div>
         </div>
+
 	{:else}
-		<div class="px-4 sm:px-6 lg:px-8 pt-4"><LoadingSpinner message="Loading space weather data..." /></div>
+		<LoadingSpinner message="Loading space weather data..." />
 	{/if}
+
     {#if selectedSatelliteInfo}
         <SatInfoPanel satellite={selectedSatelliteInfo} on:close={() => selectedSatelliteInfo = null} />
     {/if}
+
 </main>
 
 <style lang="postcss">
+     :global(body) {
+         overflow-y: scroll; /* Всегда показываем скроллбар */
+     }
+     /* Убедимся, что canvas растягивается */
      :global(.relative > div > div[bind\:this] > canvas) {
          @apply block w-full h-full;
      }

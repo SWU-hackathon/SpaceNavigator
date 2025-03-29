@@ -19,6 +19,8 @@
         currentLatRad?: number;
         currentLonRad?: number;
 	}
+    export type OrbitFilter = 'ALL' | 'LEO' | 'MEO' | 'GEO' | 'HEO' | 'SSO' | 'OTHER';
+	export type TypeFilter = 'ALL' | 'ISS' | 'OBSERVATION' | 'CAMERA';
 </script>
 
 <script lang="ts">
@@ -27,19 +29,20 @@
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import * as satellite from 'satellite.js';
 	import { getSatelliteDetails } from '$lib/satellite-info';
-	import type { OrbitFilter, TypeFilter } from './SatelliteFilter.svelte';
+	import SatelliteFilter from './SatelliteFilter.svelte'; // Импортируем фильтр сюда
 
 	export let radiationRiskLevel: string = 'None';
-	export let orbitFilter: OrbitFilter = 'ALL';
-	export let typeFilter: TypeFilter = 'ALL';
 
 	let isLoadingTLE = true;
 	let tleError: string | null = null;
 	let hoveredSatelliteName: string | null = null;
 	let labelInfo: { name: string; x: number; y: number } | null = null;
     let isFullscreen = false;
+    let currentOrbitFilter: OrbitFilter = 'ALL';
+	let currentTypeFilter: TypeFilter = 'ALL';
 
 	let container: HTMLDivElement;
+    let uiContainer: HTMLDivElement;
 
 	const EARTH_RADIUS_SCENE = 5;
 	const REAL_EARTH_RADIUS_KM = 6371;
@@ -109,9 +112,7 @@
         const altitudeKm = semiMajorAxisKm - REAL_EARTH_RADIUS_KM;
         const eccentricity = satrec.ecco;
         const inclinationDeg = satrec.inclo * (180 / Math.PI);
-
         if (isNaN(periodMinutes) || isNaN(altitudeKm)) return 'Unknown';
-
         if (eccentricity > 0.25) { return 'HEO'; }
         else if (Math.abs(periodMinutes - 1436.1) < 30 && eccentricity < 0.1 && inclinationDeg < 5) { return 'GEO'; }
         else if (altitudeKm < 2000 && Math.abs(inclinationDeg - 98) < 5) { return 'SSO'; }
@@ -122,201 +123,118 @@
         else { return 'Unknown'; }
     }
 
-    function applyFilters(satellites: SatelliteObject[], currentOrbitFilter: OrbitFilter, currentTypeFilter: TypeFilter) {
+    function applyFilters(satellites: SatelliteObject[], orbitF: OrbitFilter, typeF: TypeFilter) {
         if (!satellites || satellites.length === 0) return;
         satellites.forEach(sat => {
             let orbitMatch = false; let typeMatch = false;
-            if (currentOrbitFilter === 'ALL') { orbitMatch = true; }
-            else if (currentOrbitFilter === 'LEO') { orbitMatch = sat.orbitType === 'LEO'; }
-            else if (currentOrbitFilter === 'MEO') { orbitMatch = sat.orbitType === 'MEO'; }
-            else if (currentOrbitFilter === 'GEO') { orbitMatch = sat.orbitType === 'GEO'; }
-            else if (currentOrbitFilter === 'HEO') { orbitMatch = sat.orbitType === 'HEO'; }
-            else if (currentOrbitFilter === 'SSO') { orbitMatch = sat.orbitType === 'SSO'; }
-            else if (currentOrbitFilter === 'OTHER') { orbitMatch = sat.orbitType === 'Unknown'; }
-            if (currentTypeFilter === 'ALL') { typeMatch = true; }
-            else if (currentTypeFilter === 'ISS') { typeMatch = sat.details.type === 'ISS'; }
-            else if (currentTypeFilter === 'OBSERVATION') { typeMatch = sat.details.type === 'Earth Observation'; }
-            else if (currentTypeFilter === 'CAMERA') { typeMatch = !!sat.details.hasCamera; }
+            if (orbitF === 'ALL') { orbitMatch = true; } else if (orbitF === 'LEO') { orbitMatch = sat.orbitType === 'LEO'; } else if (orbitF === 'MEO') { orbitMatch = sat.orbitType === 'MEO'; } else if (orbitF === 'GEO') { orbitMatch = sat.orbitType === 'GEO'; } else if (orbitF === 'HEO') { orbitMatch = sat.orbitType === 'HEO'; } else if (orbitF === 'SSO') { orbitMatch = sat.orbitType === 'SSO'; } else if (orbitF === 'OTHER') { orbitMatch = sat.orbitType === 'Unknown'; }
+            if (typeF === 'ALL') { typeMatch = true; } else if (typeF === 'ISS') { typeMatch = sat.details.type === 'ISS'; } else if (typeF === 'OBSERVATION') { typeMatch = sat.details.type === 'Earth Observation'; } else if (typeF === 'CAMERA') { typeMatch = !!sat.details.hasCamera; }
             sat.isVisible = orbitMatch && typeMatch;
-
             const meshMaterial = sat.mesh.material as THREE.MeshBasicMaterial;
             const trackMaterial = sat.trackLine?.material as THREE.LineBasicMaterial;
             const targetOpacity = sat.isVisible ? 1.0 : 0.0;
             const targetTrackOpacity = sat.isVisible ? 0.4 : 0.0;
-
-            if (meshMaterial) {
-                meshMaterial.transparent = true;
-                meshMaterial.opacity = THREE.MathUtils.lerp(meshMaterial.opacity, targetOpacity, 0.1);
-                sat.mesh.visible = meshMaterial.opacity > 0.05;
-            }
-            if (trackMaterial && sat.trackLine) {
-                trackMaterial.transparent = true;
-                trackMaterial.opacity = THREE.MathUtils.lerp(trackMaterial.opacity, targetTrackOpacity, 0.1);
-                sat.trackLine.visible = trackMaterial.opacity > 0.05;
-            }
+            if (meshMaterial) { meshMaterial.transparent = true; meshMaterial.opacity = THREE.MathUtils.lerp(meshMaterial.opacity, targetOpacity, 0.1); sat.mesh.visible = meshMaterial.opacity > 0.05; }
+            if (trackMaterial && sat.trackLine) { trackMaterial.transparent = true; trackMaterial.opacity = THREE.MathUtils.lerp(trackMaterial.opacity, targetTrackOpacity, 0.1); sat.trackLine.visible = trackMaterial.opacity > 0.05; }
         });
+    }
+
+    function handleFilterUpdateFromComponent(event: CustomEvent<{ orbit: OrbitFilter; type: TypeFilter }>) {
+        currentOrbitFilter = event.detail.orbit;
+        currentTypeFilter = event.detail.type;
+        hoveredSatelliteName = null; // Сбрасываем ховер при смене фильтра
+        labelInfo = null;
     }
 
     function handleFSError(err: Error) { console.error(`Fullscreen Error: ${err.message} (${err.name})`); }
     function toggleFullscreen() {
-        if (!container) return;
+        if (!uiContainer) return;
         const doc = document as Document & { webkitExitFullscreen?: () => Promise<void>; mozCancelFullScreen?: () => Promise<void>; msExitFullscreen?: () => Promise<void>; };
-        const cont = container as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void>; mozRequestFullScreen?: () => Promise<void>; msRequestFullscreen?: () => Promise<void>; };
+        const cont = uiContainer as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void>; mozRequestFullScreen?: () => Promise<void>; msRequestFullscreen?: () => Promise<void>; };
         const isCurrentlyFullscreen = !!(doc.fullscreenElement || (doc as any).webkitFullscreenElement || (doc as any).mozFullScreenElement || (doc as any).msFullscreenElement);
-
-        if (!isCurrentlyFullscreen) {
-            if (cont.requestFullscreen) { cont.requestFullscreen().catch(handleFSError); }
-            else if (cont.mozRequestFullScreen) { cont.mozRequestFullScreen().catch(handleFSError); }
-            else if (cont.webkitRequestFullscreen) { (cont as any).webkitRequestFullscreen((Element as any).ALLOW_KEYBOARD_INPUT).catch(handleFSError); }
-            else if (cont.msRequestFullscreen) { cont.msRequestFullscreen().catch(handleFSError); }
-        } else {
-            if (doc.exitFullscreen) { doc.exitFullscreen().catch(handleFSError); }
-            else if (doc.mozCancelFullScreen) { doc.mozCancelFullScreen().catch(handleFSError); }
-            else if (doc.webkitExitFullscreen) { doc.webkitExitFullscreen().catch(handleFSError); }
-            else if (doc.msExitFullscreen) { doc.msExitFullscreen().catch(handleFSError); }
-        }
+        if (!isCurrentlyFullscreen) { if (cont.requestFullscreen) { cont.requestFullscreen().catch(handleFSError); } else if (cont.mozRequestFullScreen) { cont.mozRequestFullScreen().catch(handleFSError); } else if (cont.webkitRequestFullscreen) { (cont as any).webkitRequestFullscreen((Element as any).ALLOW_KEYBOARD_INPUT).catch(handleFSError); } else if (cont.msRequestFullscreen) { cont.msRequestFullscreen().catch(handleFSError); } }
+        else { if (doc.exitFullscreen) { doc.exitFullscreen().catch(handleFSError); } else if (doc.mozCancelFullScreen) { doc.mozCancelFullScreen().catch(handleFSError); } else if (doc.webkitExitFullscreen) { doc.webkitExitFullscreen().catch(handleFSError); } else if (doc.msExitFullscreen) { doc.msExitFullscreen().catch(handleFSError); } }
     }
 
     $: if(localSatelliteObjects && localSatelliteObjects.length > 0 && !isLoadingTLE) {
-        applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
+        applyFilters(localSatelliteObjects, currentOrbitFilter, currentTypeFilter);
     }
 
-
 	onMount(() => {
-		if (!container) {
-			console.error("[SatelliteGlobe] onMount: Container div not found!");
-			isLoadingTLE = false;
-			tleError = "Initialization error: Container not found.";
-			return;
-		}
+		if (!container) { isLoadingTLE = false; tleError = "Init error: Canvas container not found."; return; }
+        if (!uiContainer) { isLoadingTLE = false; tleError = "Init error: UI container not found."; return; }
 
 		let isMounted = true; let animationFrameId: number;
 		let rendererInstance: THREE.WebGLRenderer | null = null; let sceneInstance: THREE.Scene | null = null;
 		let cameraInstance: THREE.PerspectiveCamera | null = null; let controlsInstance: OrbitControls | null = null;
 		let localSatelliteMeshes: THREE.Mesh[] = [];
-
 		const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2(); const labelPositionVector = new THREE.Vector3();
 
-		function disposeObject(obj: any) {
-			 if (!obj) return;
-			 if (obj.geometry?.dispose) obj.geometry.dispose();
-			 if (obj.material) {
-				 if (Array.isArray(obj.material)) {
-					 obj.material.forEach((material: any) => disposeMaterial(material));
-				 } else {
-					 disposeMaterial(obj.material);
-				 }
-			 }
-		}
-		function disposeMaterial(material: any) {
-			 if (!material) return;
-			 if (material.map?.dispose) material.map.dispose();
-			 if (material.dispose) material.dispose();
-		}
+		function disposeObject(obj: any) { if (!obj) return; if (obj.geometry?.dispose) obj.geometry.dispose(); if (obj.material) { if (Array.isArray(obj.material)) { obj.material.forEach((material: any) => disposeMaterial(material)); } else { disposeMaterial(obj.material); } } }
+		function disposeMaterial(material: any) { if (!material) return; if (material.map?.dispose) material.map.dispose(); if (material.dispose) material.dispose(); }
 
 		function updateSatellitePositions(currentTime: Date) {
 			if (!isMounted || !localSatelliteObjects || localSatelliteObjects.length === 0) return;
-			const gmst = satellite.gstime(currentTime);
-			const highLat = 50 * (Math.PI / 180);
-			const isHazard = ['High', 'Severe', 'Extreme'].includes(radiationRiskLevel);
-
+			const gmst = satellite.gstime(currentTime); const highLat = 50 * (Math.PI / 180); const isHazard = ['High', 'Severe', 'Extreme'].includes(radiationRiskLevel);
 			localSatelliteObjects.forEach(sat => {
 				if (!sat.isVisible) { if (sat.mesh.visible) sat.mesh.visible = false; if (sat.trackLine?.visible) sat.trackLine.visible = false; return; };
 				try {
-					const posVel = satellite.propagate(sat.satrec, currentTime);
-					const posEci = posVel.position as satellite.EciVec3<number>;
-					if (!posEci) return;
-					const geo = satellite.eciToGeodetic(posEci, gmst);
-                    sat.currentLatRad = geo.latitude; sat.currentLonRad = geo.longitude;
-					const r = EARTH_RADIUS_SCENE + geo.height / SCALE_FACTOR;
-					const x = r * Math.cos(geo.latitude) * Math.cos(geo.longitude);
-					const y = r * Math.sin(geo.latitude);
-					const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
+					const posVel = satellite.propagate(sat.satrec, currentTime); const posEci = posVel.position as satellite.EciVec3<number>; if (!posEci) return;
+					const geo = satellite.eciToGeodetic(posEci, gmst); sat.currentLatRad = geo.latitude; sat.currentLonRad = geo.longitude;
+					const r = EARTH_RADIUS_SCENE + geo.height / SCALE_FACTOR; const x = r * Math.cos(geo.latitude) * Math.cos(geo.longitude); const y = r * Math.sin(geo.latitude); const z = -r * Math.cos(geo.latitude) * Math.sin(geo.longitude);
                     sat.mesh.position.set(x, y, z);
-					let targetColor = sat.defaultColor;
-					if (isHazard && Math.abs(geo.latitude) > highLat) { targetColor = HAZARD_COLOR; }
-					const material = sat.mesh.material as THREE.MeshBasicMaterial;
-					if (material?.color && material.color.getHex() !== targetColor) { material.color.setHex(targetColor); }
-				} catch (error: any) {
-					 if (error.message.includes('decay')) { if(sat.mesh.visible || sat.isVisible) console.warn(`Satellite ${sat.name} orbit decayed.`); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; }
-					 else { console.error(`Error propagating sat ${sat.name}:`, error); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; }
-				 }
+					let targetColor = sat.defaultColor; if (isHazard && Math.abs(geo.latitude) > highLat) { targetColor = HAZARD_COLOR; }
+					const material = sat.mesh.material as THREE.MeshBasicMaterial; if (material?.color && material.color.getHex() !== targetColor) { material.color.setHex(targetColor); }
+				} catch (error: any) { if (error.message.includes('decay')) { if(sat.mesh.visible || sat.isVisible) console.warn(`Sat ${sat.name} decayed.`); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; } else { console.error(`Propagate error ${sat.name}:`, error); sat.mesh.visible = false; if(sat.trackLine) sat.trackLine.visible = false; sat.isVisible = false; } }
 			});
 		}
 
 		function animate() {
 			if (!isMounted || !rendererInstance || !sceneInstance || !cameraInstance) { if(animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = 0; return; }
 			animationFrameId = requestAnimationFrame(animate);
-			applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
+			applyFilters(localSatelliteObjects, currentOrbitFilter, currentTypeFilter);
 			updateSatellitePositions(new Date());
 			controlsInstance?.update();
-            // --- Обновление Позиции Метки (полный код) ---
 			if (hoveredSatelliteName && container && cameraInstance) {
 				const satObject = localSatelliteObjects.find(s => s.name === hoveredSatelliteName);
                 if (satObject?.isVisible && satObject.mesh.visible) {
-					labelPositionVector.copy(satObject.mesh.position);
-					labelPositionVector.project(cameraInstance);
-					if (labelPositionVector.z < 1) {
-						const screenX = (labelPositionVector.x + 1) / 2 * container.clientWidth;
-						const screenY = (-labelPositionVector.y + 1) / 2 * container.clientHeight;
-						labelInfo = { name: hoveredSatelliteName, x: screenX, y: screenY };
-					} else { labelInfo = null; }
+					labelPositionVector.copy(satObject.mesh.position); labelPositionVector.project(cameraInstance);
+					if (labelPositionVector.z < 1) { const sx = (labelPositionVector.x + 1) / 2 * container.clientWidth; const sy = (-labelPositionVector.y + 1) / 2 * container.clientHeight; labelInfo = { name: hoveredSatelliteName, x: sx, y: sy }; }
+					else { labelInfo = null; }
 				} else { labelInfo = null; }
 			} else { labelInfo = null; }
-            // ------------------------------------------
 			rendererInstance.render(sceneInstance, cameraInstance);
 		}
 
 		function handleResize() {
 			 if (!isMounted || !container || !rendererInstance || !cameraInstance) return;
 			 const width = container.clientWidth; const height = container.clientHeight;
-			 cameraInstance.aspect = width / height;
-			 cameraInstance.updateProjectionMatrix();
+			 cameraInstance.aspect = width / height; cameraInstance.updateProjectionMatrix();
 			 rendererInstance.setSize(width, height);
 		 }
 
 		 function onMouseMove(event: MouseEvent) {
 			 if (!isMounted || !container || !cameraInstance) return;
 			 const rect = container.getBoundingClientRect();
-			 mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-			 mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-			 raycaster.setFromCamera(mouse, cameraInstance);
-			 const visibleMeshes = localSatelliteMeshes.filter(m => m.visible);
-			 const intersects = raycaster.intersectObjects(visibleMeshes);
-			 if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) {
-				 const mesh = intersects[0].object;
-				 const sat = localSatelliteObjects.find(s => s.mesh === mesh);
-				 hoveredSatelliteName = sat ? sat.name : null;
-			 } else {
-				 hoveredSatelliteName = null;
-			 }
+			 mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+			 raycaster.setFromCamera(mouse, cameraInstance); const visibleMeshes = localSatelliteMeshes.filter(m => m.visible); const intersects = raycaster.intersectObjects(visibleMeshes);
+			 if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) { const mesh = intersects[0].object; const sat = localSatelliteObjects.find(s => s.mesh === mesh); hoveredSatelliteName = sat ? sat.name : null; }
+			 else { hoveredSatelliteName = null; }
 		 }
 
-		 function onMouseLeave() {
-			 hoveredSatelliteName = null;
-			 labelInfo = null;
-		 }
+		 function onMouseLeave() { hoveredSatelliteName = null; labelInfo = null; }
 
         function onClick(event: MouseEvent) {
              if (!isMounted || !container || !cameraInstance) return;
              const rect = container.getBoundingClientRect();
-             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-             raycaster.setFromCamera(mouse, cameraInstance);
-             const visibleMeshes = localSatelliteMeshes.filter(m => m.visible);
-             const intersects = raycaster.intersectObjects(visibleMeshes);
-             if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) {
-                 const mesh = intersects[0].object;
-                 const clickedSat = localSatelliteObjects.find(s => s.mesh === mesh);
-                 if (clickedSat) {
-                     dispatch('satelliteclick', { ...clickedSat });
-                 }
-             }
+             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+             raycaster.setFromCamera(mouse, cameraInstance); const visibleMeshes = localSatelliteMeshes.filter(m => m.visible); const intersects = raycaster.intersectObjects(visibleMeshes);
+             if (intersects.length > 0 && intersects[0].object instanceof THREE.Mesh) { const mesh = intersects[0].object; const clickedSat = localSatelliteObjects.find(s => s.mesh === mesh); if (clickedSat) { dispatch('satelliteclick', { ...clickedSat }); } }
         }
 
          function handleFullscreenChange() {
              const doc = document as Document & { webkitFullscreenElement?: Element; mozFullScreenElement?: Element; msFullscreenElement?: Element; };
-             isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+             isFullscreen = !!(doc.fullscreenElement === uiContainer || (doc as any).webkitFullscreenElement === uiContainer || (doc as any).mozFullScreenElement === uiContainer || (doc as any).msFullscreenElement === uiContainer);
              setTimeout(handleResize, 150);
          }
 
@@ -362,7 +280,7 @@
 						 sceneInstance?.add(satMesh);
 					 } catch (e) { console.error(`Error initializing sat ${tle.name}:`, e); }
 				 });
-				applyFilters(localSatelliteObjects, orbitFilter, typeFilter);
+				applyFilters(localSatelliteObjects, currentOrbitFilter, currentTypeFilter);
                 isLoadingTLE = false;
 				animate();
 				window.addEventListener('resize', handleResize);
@@ -413,51 +331,26 @@
 
 </script>
 
-<div class="w-full h-full border dark:border-gray-700 rounded-lg overflow-hidden relative bg-black">
-	{#if isLoadingTLE}
-        <div class="absolute inset-0 flex items-center justify-center bg-gray-500/50 text-white z-10">
-			 <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-				 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-				 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-			 </svg>
-			Loading TLE Data...
-		</div>
-	{:else if tleError}
-        <div class="absolute inset-0 flex items-center justify-center bg-red-800/80 text-white p-4 text-center z-10">
-			Error: {tleError}
-		</div>
-	{/if}
-	<div bind:this={container} class="w-full h-full cursor-grab">
-	</div>
+<div bind:this={uiContainer} class="w-full h-full relative bg-black">
+	<div bind:this={container} class="absolute inset-0 z-0"></div>
 	{#if labelInfo}
-		<div
-            class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap"
-            style:left="{labelInfo.x}px" style:top="{labelInfo.y}px" style="transform: translate(-50%, -130%); z-index: 20;"
-        >
+		<div class="absolute bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap" style:left="{labelInfo.x}px" style:top="{labelInfo.y}px" style="transform: translate(-50%, -130%); z-index: 30;">
 			{labelInfo.name}
 		</div>
 	{/if}
+    <div class="absolute top-4 left-4 z-20 opacity-90 hover:opacity-100 transition-opacity">
+         <SatelliteFilter on:filterchange={handleFilterUpdateFromComponent} />
+    </div>
     {#if !isLoadingTLE && !tleError}
-    <button
-        on:click={toggleFullscreen}
-        class="absolute bottom-3 right-3 z-10 p-1.5 bg-black bg-opacity-40 text-white rounded-md hover:bg-opacity-60 focus:outline-none focus:ring-2 focus:ring-white"
-        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-    >
-        {#if isFullscreen}
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /> </svg>
-        {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m4.5 11.25v-4.5m0 4.5h-4.5m4.5 0L15 15" /> </svg>
-        {/if}
+    <button on:click={toggleFullscreen} class="absolute bottom-3 right-3 z-20 p-1.5 bg-black bg-opacity-40 text-white rounded-md hover:bg-opacity-60 focus:outline-none focus:ring-2 focus:ring-white" aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+        {#if isFullscreen} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /> </svg> {:else} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"> <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m4.5 11.25v-4.5m0 4.5h-4.5m4.5 0L15 15" /> </svg> {/if}
     </button>
     {/if}
+	{#if isLoadingTLE} <div class="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80 text-white z-50"> <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle> <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> Loading TLE Data... </div>
+	{:else if tleError} <div class="absolute inset-0 flex items-center justify-center bg-red-800 bg-opacity-90 text-white p-4 text-center z-50">Error: {tleError}</div> {/if}
 </div>
 <style>
-	div[bind\:this] { }
+	div[bind\:this] { width: 100%; height: 100%; }
 	.absolute { }
-     div[bind\:this] :global(canvas) {
-         display: block;
-         width: 100%;
-         height: 100%;
-     }
+     div[bind\:this] :global(canvas) { display: block; width: 100%; height: 100%; }
 </style>
