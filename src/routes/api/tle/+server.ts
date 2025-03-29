@@ -6,7 +6,7 @@ import type { RequestHandler } from './$types';
 const CELESTRAK_ACTIVE_URL = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle';
 
 // --- ИЗМЕНЕНО: Указываем желаемое количество спутников ---
-const TARGET_SATELLITE_COUNT = 5000;
+const TARGET_SATELLITE_COUNT = 500;
 // -------------------------------------------------------
 
 interface TleData {
